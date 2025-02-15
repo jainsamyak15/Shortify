@@ -1,36 +1,50 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import TinderCard from "react-tinder-card";
 
 interface NewsItem {
   title: string;
   description: string;
+  hasSeen: boolean;
 }
-import TinderCard from "react-tinder-card";
-import axios from "axios";
 
-const NEW_API = process.env.NEXT_PUBLIC_NEW_API;
-
-const fetchNews = async () => {
+const fetchNewsFromDB = async (): Promise<NewsItem[]> => {
   try {
-    // here query param is us change that
-    const response: any = await axios.get(
-      `https://newsapi.org/v2/top-headlines?country=us&apiKey=${NEW_API}`
-    );
+    const response = await fetch(`/api/db`);
+    const data = await response.json(); // Extract the response JSON
 
-    console.log("response", response.data.articles[0])
-    const news = response.data.articles || [];
-    return news
-      .filter((n: any) => n.title && n.description) // Ensure valid articles
-      .map((n: any) => ({
-        title: n.title,
-        description: n.description,
-      }));
+    if (!data.news) {
+      console.error("Invalid response from /api/db", data);
+      return [];
+    }
+
+    if (data.count === 0) {
+      try {
+        const newsResponse = await fetch(`/api/news`);
+        const newsData = await newsResponse.json();
+
+        if (!newsData || !Array.isArray(newsData)) {
+          console.error("Invalid response from /api/news", newsData);
+          return [];
+        }
+
+        console.log("Fetched from /api/news", newsData);
+        return newsData; // Assuming /api/news directly returns an array
+      } catch (error) {
+        console.error("Error fetching news from API source:", error);
+        return [];
+      }
+    }
+
+    return data.news; // Extract and return only the news array
   } catch (error) {
-    console.error("Error fetching news:", error);
-  const [newsList, setNewsList] = useState<NewsItem[]>([]);
+    console.error("Error fetching news from database:", error);
+    return [];
   }
 };
+
+
 
 export default function Page() {
   const [newsList, setNewsList] = useState<NewsItem[]>([]);
@@ -38,15 +52,35 @@ export default function Page() {
 
   useEffect(() => {
     const getNews = async () => {
-      const news = await fetchNews();
-      setNewsList(news);
+      const allNews = await fetchNewsFromDB();
+      setNewsList(allNews); // Fix: Remove extra dot (allNews.)
     };
     getNews();
   }, []);
 
-  const onSwipe = (direction: string, title: string) => {
-    console.log(`Swiped ${direction} on: ${title}`);
-    setNewsList((prev) => prev.filter((news) => news.title !== title));
+  const onSwipe = async (direction: string, title: string, news: any) => {
+    console.log("news", news.id);
+    try {
+      const response = await fetch("/api/db", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ hasSeen: true, id: news.id }),
+      });
+
+      return response.json();
+    } catch (error) {
+      console.error("Error fetching news:", error);
+      return [];
+    }
+
+    // console.log(`Swiped ${direction} on: ${title}`);
+    // setNewsList((prev) =>
+    //   prev.map((news) =>
+    //     news.title === title ? { ...news, hasSeen: true } : news
+    //   )
+    // );
   };
 
   const swipe = (dir: string) => {
@@ -65,9 +99,11 @@ export default function Page() {
           newsList.map((news, index) => (
             <TinderCard
               key={news.title}
-              onSwipe={(dir) => onSwipe(dir, news.title)}
+              onSwipe={(dir) => onSwipe(dir, news.title, news)}
               preventSwipe={[]}
-              className={`absolute w-full h-full shadow-lg rounded-lg bg-white flex justify-center items-center z-${newsList.length - index}`}
+              className={`absolute w-full h-full shadow-lg rounded-lg bg-white flex justify-center items-center z-${
+                newsList.length - index
+              }`}
             >
               <div className="w-full h-full flex flex-col justify-center items-center p-4">
                 <h2 className="text-xl font-bold">{news.title}</h2>
@@ -76,7 +112,7 @@ export default function Page() {
             </TinderCard>
           ))
         ) : (
-          <p className="text-center text-lg">No more news available!</p>
+          <p className="text-center text-lg">No more unseen news!</p>
         )}
       </div>
     </div>
