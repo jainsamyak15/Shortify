@@ -1,9 +1,9 @@
 "use client";
-import { motion } from 'framer-motion';
-import Link from 'next/link';
-import { Menu, X, Home, PlusSquare, User, LogOut } from 'lucide-react';
-import { use, useState } from 'react';
-import { usePrivy } from '@privy-io/react-auth';
+import { motion } from "framer-motion";
+import Link from "next/link";
+import { Menu, X, Home, PlusSquare, User, LogOut } from "lucide-react";
+import { useState } from "react";
+import { usePrivy } from "@privy-io/react-auth";
 
 export function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
@@ -11,40 +11,40 @@ export function Navbar() {
 
   const menuVariants = {
     open: { opacity: 1, x: 0 },
-    closed: { opacity: 0, x: "100%" }
+    closed: { opacity: 0, x: "100%" },
   };
 
   const links = [
-    { href: '/home', icon: <Home size={20} />, label: 'Home' },
-    { href: '/submitNews', icon: <PlusSquare size={20} />, label: 'Submit News' },
-    { href: '/home/UserSub', icon: <User size={20} />, label: 'My Posts' },
+    { href: "/home", icon: <Home size={20} />, label: "Home" },
+    { href: "/submitNews", icon: <PlusSquare size={20} />, label: "Submit News" },
+    { href: "/home/UserSub", icon: <User size={20} />, label: "My Posts" },
   ];
 
   return (
     <>
       {/* Desktop Navigation */}
-      <nav className="hidden md:flex fixed top-0 left-0 right-0 bg-white/90 backdrop-blur-sm z-50 px-8 py-4">
+      <nav className="hidden md:flex fixed top-0 left-0 right-0 bg-gradient-to-r from-transparent via-white/10 to-transparent backdrop-blur-md z-50 px-8 py-4">
         <div className="flex items-center justify-between w-full max-w-7xl mx-auto">
-          <Link href="/" className="text-xl font-bold">
+          <Link href="/" className="text-xl font-bold text-white">
             Shortify
           </Link>
-          
+
           <div className="flex items-center space-x-8">
             {links.map((link) => (
-              <Link 
-                key={link.href} 
+              <Link
+                key={link.href}
                 href={link.href}
-                className="flex items-center space-x-2 hover:text-violet-600 transition-colors"
+                className="flex items-center space-x-2 text-white hover:text-violet-300 transition-colors"
               >
                 {link.icon}
                 <span>{link.label}</span>
               </Link>
             ))}
-            
+
             {authenticated && (
               <button
                 onClick={logout}
-                className="flex items-center space-x-2 text-red-500 hover:text-red-600 transition-colors"
+                className="flex items-center space-x-2 text-red-300 hover:text-red-400 transition-colors"
               >
                 <LogOut size={20} />
                 <span>Logout</span>
@@ -58,7 +58,7 @@ export function Navbar() {
       <div className="md:hidden">
         {/* Hamburger Button */}
         <motion.button
-          className="fixed top-4 right-4 z-50 p-3 bg-white rounded-xl shadow-lg"
+          className="fixed top-4 right-4 z-50 p-3 bg-white/20 text-white rounded-xl shadow-lg backdrop-blur-md"
           whileHover={{ scale: 1.1 }}
           whileTap={{ scale: 0.9 }}
           onClick={() => setIsOpen(!isOpen)}
@@ -68,7 +68,7 @@ export function Navbar() {
 
         {/* Mobile Menu */}
         <motion.nav
-          className="fixed top-0 right-0 h-screen w-64 bg-white shadow-2xl z-40 p-8"
+          className="fixed top-0 right-0 h-screen w-64 bg-white/20 backdrop-blur-md shadow-2xl z-40 p-8"
           animate={isOpen ? "open" : "closed"}
           variants={menuVariants}
           initial="closed"
@@ -76,24 +76,24 @@ export function Navbar() {
         >
           <div className="flex flex-col space-y-6 mt-16">
             {links.map((link) => (
-              <Link 
-                key={link.href} 
+              <Link
+                key={link.href}
                 href={link.href}
-                className="flex items-center space-x-2 p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                className="flex items-center space-x-2 p-2 text-white hover:bg-white/10 rounded-lg transition-colors"
                 onClick={() => setIsOpen(false)}
               >
                 {link.icon}
                 <span>{link.label}</span>
               </Link>
             ))}
-            
+
             {authenticated && (
               <button
                 onClick={() => {
                   logout();
                   setIsOpen(false);
                 }}
-                className="flex items-center space-x-2 p-2 hover:bg-gray-100 rounded-lg transition-colors text-red-500"
+                className="flex items-center space-x-2 p-2 text-red-300 hover:bg-white/10 rounded-lg transition-colors"
               >
                 <LogOut size={20} />
                 <span>Logout</span>
