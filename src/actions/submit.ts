@@ -11,10 +11,9 @@ export default async function SubNews(
   const response = await prisma.news.create({
     data: {
       title: title,
-      description: description,
+      summary: description,
       author: "fetch from middleware",
-      trustScore: score,
-      mint_price: 0, // replace later
+      confidence_score: score,
     },
   });
 

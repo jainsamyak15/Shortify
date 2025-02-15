@@ -8,11 +8,10 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const country = searchParams.get("country") || "us"; // Default to 'us'
 
-    const response = await axios.get(
-      `https://newsapi.org/v2/top-headlines?country=${country}&apiKey=${NEWS_API_KEY}`
-    );
+    const response = await axios.get(`https://newsapi.org/v2/top-headlines?country=${country}&apiKey=${NEWS_API_KEY}`);
 
-    const news = response.data.articles || [];
+    const news = (response.data as { articles: any[] }).articles || [];
+    
     const processedNews = news.map((n: any) => ({
       title: n.title,
       description: n.description,
@@ -39,7 +38,7 @@ export async function POST(req: NextRequest) {
       `https://newsapi.org/v2/top-headlines?country=${country}&apiKey=${NEWS_API_KEY}`
     );
 
-    const news = response.data.articles || [];
+    const news = (response.data as { articles: any[] }).articles || [];
     const processedNews = news.map((n: any) => ({
       title: n.title,
       description: n.description,
