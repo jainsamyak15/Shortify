@@ -1,10 +1,12 @@
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-from typing import List, Dict, Optional
 import os
+from typing import List, Dict, Optional
 from datetime import datetime
+from fastapi import FastAPI, HTTPException, Query, Body
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from main import NewsSummarizerAgent  
+import json
 
 # Response Models
 class ArticleSummary(BaseModel):
@@ -30,7 +32,7 @@ class NewsRequest(BaseModel):
 app = FastAPI(
     title="News Summarizer API",
     description="API for fetching and summarizing news articles using NewsAPI and LangChain",
-    version="1.0.0"
+    version="1.1.0"
 )
 
 # Add CORS middleware
@@ -63,10 +65,10 @@ async def root():
         "documentation": "/docs"
     }
 
-@app.post("/summarize", response_model=NewsResponse)
-async def summarize_news(request: NewsRequest):
+@app.post("/summarize")
+async def summarize_news_stream(request: NewsRequest = Body(...)):
     """
-    Summarize news articles based on NewsAPI URL or parameters
+    Stream summarized news articles as they are processed.
     """
     if not news_agent:
         raise HTTPException(
@@ -74,44 +76,25 @@ async def summarize_news(request: NewsRequest):
             detail="News agent not properly initialized. Check server logs."
         )
     
-    try:
-        # Use either URL or params
-        query = request.url if request.url else request.params
-        if not query:
-            raise HTTPException(
-                status_code=400,
-                detail="Either url or params must be provided"
-            )
-        
-        # Process news
-        summaries = news_agent.process_news(
-            query,
-            max_articles=request.max_articles
-        )
-        
-        # Convert to response model
-        article_summaries = [
-            ArticleSummary(
-                title=s.title,
-                source=s.source,
-                published_date=s.published_date,
-                summary=s.summary,
-                url=s.url
-            ) for s in summaries
-        ]
-        
-        return NewsResponse(
-            status="success",
-            query_info=str(query),
-            summaries=article_summaries,
-            timestamp=datetime.now().isoformat()
-        )
-        
-    except Exception as e:
+    if not request.url and not request.params:
         raise HTTPException(
-            status_code=500,
-            detail=str(e)
+            status_code=400,
+            detail="Either 'url' or 'params' must be provided."
         )
+    
+    query = request.url if request.url else request.params
+
+    async def article_stream():
+        """
+        Asynchronous generator to stream article summaries.
+        """
+        try:
+            async for summary in news_agent.process_news_streaming(query, max_articles=request.max_articles):
+                yield f"data: {summary}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(article_stream(), media_type="text/event-stream")
 
 @app.get("/top-headlines", response_model=NewsResponse)
 async def get_top_headlines(
@@ -120,9 +103,6 @@ async def get_top_headlines(
     q: str = Query(None, description="Search query"),
     max_articles: int = Query(5, description="Maximum number of articles to fetch")
 ):
-    """
-    Get summarized top headlines with optional filters
-    """
     if not news_agent:
         raise HTTPException(
             status_code=500,
@@ -147,20 +127,29 @@ async def get_top_headlines(
                 detail="At least one parameter (country, category, or q) must be provided"
             )
         
-        # Process news
-        summaries = news_agent.process_news(params, max_articles=max_articles)
-        
-        # Convert to response model
-        article_summaries = [
-            ArticleSummary(
-                title=s.title,
-                source=s.source,
-                published_date=s.published_date,
-                summary=s.summary,
-                url=s.url
-            ) for s in summaries
-        ]
-        
+        # Process news (consume async generator)
+        article_summaries = []
+        async for s in news_agent.process_news_streaming(params, max_articles=max_articles):
+            try:
+                # Parse the string into a Python dictionary
+                article_data = json.loads(s) if isinstance(s, str) else s
+                
+                # Extract `data` from the parsed dictionary
+                data = article_data.get("data", {})
+                
+                # Append the parsed and structured article summary
+                article_summaries.append(
+                    ArticleSummary(
+                        title=data.get("title", "N/A"),
+                        source=data.get("source", "Unknown"),
+                        published_date=data.get("published_date", "N/A"),
+                        summary=data.get("summary", "No summary available."),
+                        url=data.get("url", "#")
+                    )
+                )
+            except (json.JSONDecodeError, AttributeError, TypeError) as e:
+                print(f"Error processing article: {s}, Error: {str(e)}")
+
         return NewsResponse(
             status="success",
             query_info=str(params),
@@ -171,8 +160,9 @@ async def get_top_headlines(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=str(e)
+            detail=f"Failed to fetch or summarize top headlines. Error: {str(e)}"
         )
+
 
 if __name__ == "__main__":
     import uvicorn
