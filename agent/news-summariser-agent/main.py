@@ -1,13 +1,17 @@
 import os
-from typing import List, Dict, Optional, Union
+from typing import List, Dict, Optional, Union, Any
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs
 import requests
-from langchain_core.pydantic_v1 import BaseModel, Field
+import asyncio
+import json
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from langchain.chains import LLMChain
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
-from langchain_core.output_parsers import JsonOutputParser
+from contextlib import asynccontextmanager
 
 class NewsArticle(BaseModel):
     title: str = Field(description="Title of the article")
@@ -20,13 +24,20 @@ class NewsAPIRequest(BaseModel):
     endpoint: str = Field(description="API endpoint (everything or top-headlines)")
     params: Dict = Field(description="Query parameters")
 
+class SummarizeRequest(BaseModel):
+    url: Optional[str] = None
+    params: Optional[Dict[str, Any]] = None
+    max_articles: int = 5
+
+app = FastAPI()
+
 class NewsSummarizerAgent:
     def __init__(self, news_api_key: str, openai_api_key: str):
         self.news_api_key = news_api_key
         self.base_url = "https://newsapi.org/v2"
         self.llm = ChatOpenAI(
             temperature=0.1,
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",
             api_key=openai_api_key
         )
         
@@ -52,15 +63,15 @@ class NewsSummarizerAgent:
         parsed = urlparse(url)
         path_parts = parsed.path.split('/')
         
-        # Extract endpoint (everything or top-headlines)
+        
         endpoint = path_parts[-1]
         
-        # Parse query parameters
+        
         params = parse_qs(parsed.query)
-        # Convert all param values from lists to single values
+        
         params = {k: v[0] for k, v in params.items()}
         
-        # Remove API key if present
+        
         params.pop('apiKey', None)
         
         return NewsAPIRequest(endpoint=endpoint, params=params)
@@ -68,20 +79,20 @@ class NewsSummarizerAgent:
     def fetch_news(self, url_or_params: Union[str, Dict], max_articles: int = 5) -> List[Dict]:
         """Fetch news articles from NewsAPI using either URL or parameters."""
         if isinstance(url_or_params, str):
-            # Parse URL
+         
             request_info = self.parse_news_api_url(url_or_params)
             endpoint = request_info.endpoint
             params = request_info.params
         else:
-            # Direct parameters
+           
             endpoint = url_or_params.pop('endpoint', 'everything')
-            params = url_or_params
+            params = url_or_params.copy()  
 
-        # Add API key and page size
+        
         params['apiKey'] = self.news_api_key
         params['pageSize'] = max_articles
 
-        # Make request
+      
         url = f"{self.base_url}/{endpoint}"
         response = requests.get(url, params=params)
         
@@ -91,7 +102,7 @@ class NewsSummarizerAgent:
 
         return response.json()["articles"]
 
-    def summarize_article(self, article: Dict) -> NewsArticle:
+    async def summarize_article(self, article: Dict) -> NewsArticle:
         """Summarize a single article using LangChain."""
         content = article.get("content", "") or article.get("description", "")
         title = article["title"]
@@ -105,11 +116,11 @@ class NewsSummarizerAgent:
                 url=article["url"]
             )
         
-        # Generate summary using LLMChain
-        summary_result = self.summary_chain.invoke({
-            "content": content,
-            "title": title
-        })
+        
+        summary_result = await asyncio.to_thread(
+            self.summary_chain.invoke,
+            {"content": content, "title": title}
+        )
         
         return NewsArticle(
             title=title,
@@ -119,86 +130,83 @@ class NewsSummarizerAgent:
             url=article["url"]
         )
 
-    def process_news(self, query: Union[str, Dict], max_articles: int = 5) -> List[NewsArticle]:
-        """Process news articles from either URL or parameter dict."""
+    async def process_news_streaming(self, query: Union[str, Dict], max_articles: int = 5):
+        """Process news articles and yield them one by one as they're processed."""
         articles = self.fetch_news(query, max_articles)
         
-        summaries = []
-        for article in articles:
+        for i, article in enumerate(articles, 1):
             try:
-                summary = self.summarize_article(article)
-                summaries.append(summary)
+                summary = await self.summarize_article(article)
+                yield json.dumps({
+                    "article_num": i,
+                    "total_articles": len(articles),
+                    "data": summary.dict()
+                }) + "\n"
             except Exception as e:
-                print(f"Error processing article {article['title']}: {str(e)}")
+                error_msg = f"Error processing article {article['title'] if 'title' in article else 'unknown'}: {str(e)}"
+                yield json.dumps({
+                    "article_num": i,
+                    "total_articles": len(articles),
+                    "error": error_msg
+                }) + "\n"
                 continue
-                
-        return summaries
 
-    def format_results(self, summaries: List[NewsArticle], query_info: Optional[str] = None) -> str:
-        """Format the results in a readable way."""
-        output = "📰 NEWS SUMMARIES 📰\n\n"
-        
-        if query_info:
-            output += f"Query: {query_info}\n"
-            output += "=" * 50 + "\n\n"
-        
-        for i, summary in enumerate(summaries, 1):
-            output += f"Article {i}:\n"
-            output += f"Title: {summary.title}\n"
-            output += f"Source: {summary.source}\n"
-            output += f"Published: {summary.published_date}\n"
-            output += f"Summary: {summary.summary}\n"
-            output += f"URL: {summary.url}\n"
-            output += "-" * 50 + "\n"
-            
-        return output
 
-def main():
-    # Example usage with different formats
-    examples = [
-        "https://newsapi.org/v2/everything?q=Apple&from=2025-02-09&sortBy=popularity",
-        "https://newsapi.org/v2/top-headlines?country=us",
-        "https://newsapi.org/v2/top-headlines?sources=bbc-news",
-        "https://newsapi.org/v2/everything?domains=techcrunch.com,thenextweb.com",
-        "https://newsapi.org/v2/top-headlines?q=trump",
-        # Parameter dictionary example
-        {
-            "endpoint": "everything",
-            "q": "cryptocurrency",
-            "language": "en",
-            "sortBy": "publishedAt"
-        }
-    ]
+@asynccontextmanager
+async def get_news_summarizer():
     
-    # Load API keys
     news_api_key = os.getenv("NEWS_API_KEY")
     openai_api_key = os.getenv("OPENAI_API_KEY")
     
     if not news_api_key or not openai_api_key:
         raise ValueError("Please set NEWS_API_KEY and OPENAI_API_KEY environment variables")
     
-    # Initialize agent
-    agent = NewsSummarizerAgent(news_api_key, openai_api_key)
     
-    # Process each example
-    for query in examples:
-        try:
-            print(f"\nProcessing query: {query}")
-            summaries = agent.process_news(query, max_articles=3)
-            formatted_output = agent.format_results(summaries, str(query))
+    agent = NewsSummarizerAgent(news_api_key, openai_api_key)
+    try:
+        yield agent
+    finally:
+        
+        pass
+
+@app.post("/summarize")
+async def summarize_news(request: SummarizeRequest):
+    async with get_news_summarizer() as agent:
+        
+        query = request.url if request.url else request.params
+        if not query:
+            raise HTTPException(status_code=400, detail="Either url or params must be provided")
+        
+        
+        return StreamingResponse(
+            agent.process_news_streaming(query, request.max_articles),
+            media_type="application/x-ndjson"
+        )
+
+@app.post("/top-headlines")
+async def get_top_headlines(request: SummarizeRequest):
+    async with get_news_summarizer() as agent:
+        
+        if request.params:
+            params = request.params.copy()
+            params["endpoint"] = "top-headlines"
+            query = params
+        
+        elif request.url:
+            parsed = urlparse(request.url)
+            if "top-headlines" not in parsed.path:
+                raise HTTPException(status_code=400, detail="URL must be for top-headlines endpoint")
+            query = request.url
+        else:
             
-            # Save to file
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"news_summaries_{timestamp}.txt"
-            with open(filename, "w", encoding="utf-8") as f:
-                f.write(formatted_output)
-            
-            print(formatted_output)
-            print(f"Results saved to {filename}")
-            
-        except Exception as e:
-            print(f"Error processing query {query}: {str(e)}")
-            continue
+            query = {"endpoint": "top-headlines", "country": "us"}
+        
+        
+        return StreamingResponse(
+            agent.process_news_streaming(query, request.max_articles),
+            media_type="application/x-ndjson"
+        )
 
 if __name__ == "__main__":
-    main()
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
