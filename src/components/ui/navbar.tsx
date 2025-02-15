@@ -16,8 +16,8 @@ export function Navbar() {
 
   const links = [
     { href: "/home", icon: <Home size={20} />, label: "Home" },
-    { href: "/submitNews", icon: <PlusSquare size={20} />, label: "Submit News" },
-    { href: "/home/UserSub", icon: <User size={20} />, label: "My Posts" },
+    { href: "/submit-news", icon: <PlusSquare size={20} />, label: "Submit News" },
+    { href: "/home/posts", icon: <User size={20} />, label: "My Posts" },
   ];
 
   return (
